@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Wandering Pill</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  #pill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 60px;
+    height: 22px;
+    background: #000000;
+    border-radius: 999px;
+    will-change: transform;
+    pointer-events: none;
+    visibility: hidden;
+  }
+</style>
+</head>
+<body>
+
+<div id="pill"></div>
+
+<script>
+  const pill = document.getElementById('pill');
+
+  // ---------- Config ----------
+  const PILL_W = 60;
+  const PILL_H = 22;
+  const SPEED = 180;          // px per second
+  const TURN_RATE = 1.5;      // gentle steering when far from target
+  const MAX_TURN = 8;         // sharp steering allowed when close (never snaps)
+  const SPIN_DETECT = 0.8;    // rad/s — sustained spin safety net
+  const MARGIN = 60;
+  const DELAY_MS = 3000;
+
+  // ---------- State ----------
+  let x = 0, y = 0;
+  let angle = 0;
+  let target = null;
+  let started = false;
+  let prevDist = Infinity;
+
+  let straightMode = false;
+  let spinTimer = 0;
+  let spinThreshold = rand(3, 7);
+
+  function rand(min, max) {
+    return min + Math.random() * (max - min);
+  }
+
+  function clamp(v, min, max) {
+    return Math.max(min, Math.min(max, v));
+  }
+
+  function pickTarget() {
+    return {
+      x: rand(MARGIN, window.innerWidth - MARGIN),
+      y: rand(MARGIN, window.innerHeight - MARGIN)
+    };
+  }
+
+  function pickAheadTarget() {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const dir = angle + rand(-1.2, 1.2);
+    const dist = Math.max(W, H);
+    return {
+      x: clamp(x + Math.cos(dir) * dist, MARGIN, W - MARGIN),
+      y: clamp(y + Math.sin(dir) * dist, MARGIN, H - MARGIN)
+    };
+  }
+
+  function shortestAngleLerp(a, b, t) {
+    let diff = ((b - a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+    return a + diff * t;
+  }
+
+  function nextTarget() {
+    if (straightMode) {
+      straightMode = false;
+      spinThreshold = rand(3, 7);
+    }
+    target = pickTarget();
+    prevDist = Infinity;
+  }
+
+  function spawnAtEdge() {
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const side = Math.floor(Math.random() * 4);
+
+    if (side === 0)      { x = rand(0, W);  y = -40; }
+    else if (side === 1) { x = W + 40;      y = rand(0, H); }
+    else if (side === 2) { x = rand(0, W);  y = H + 40; }
+    else                 { x = -40;         y = rand(0, H); }
+
+    target = pickTarget();
+    angle = Math.atan2(target.y - y, target.x - x);
+
+    pill.style.visibility = 'visible';
+    started = true;
+  }
+
+  let lastTime = performance.now();
+
+  function animate(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+
+    if (started) {
+      const dx = target.x - x;
+      const dy = target.y - y;
+      const dist = Math.hypot(dx, dy);
+
+      const prevAngle = angle;
+      const desired = Math.atan2(dy, dx);
+
+      // KEY FIX: turn rate scales with proximity.
+      // Far away -> gentle TURN_RATE. Close -> tight enough to actually
+      // hit the point (need turn radius < dist). Never snaps.
+      const turnRate = clamp((SPEED / Math.max(dist, 1)) * 1.5, TURN_RATE, MAX_TURN);
+      angle = shortestAngleLerp(angle, desired, Math.min(1, turnRate * dt));
+
+      const angularSpeed = Math.abs(angle - prevAngle) / dt;
+
+      if (!straightMode) {
+        if (angularSpeed > SPIN_DETECT) {
+          spinTimer += dt;
+        } else {
+          spinTimer = Math.max(0, spinTimer - dt * 2);
+        }
+
+        if (spinTimer >= spinThreshold) {
+          straightMode = true;
+          spinTimer = 0;
+          target = pickAheadTarget();
+          prevDist = Infinity;
+        }
+      }
+
+      x += Math.cos(angle) * SPEED * dt;
+      y += Math.sin(angle) * SPEED * dt;
+
+      // Reached target: close enough, OR was close and is now moving away
+      // (belt-and-suspenders — guarantees no orbit can persist)
+      const closing = dist < prevDist;
+      if (dist < 30 || (dist < 150 && !closing)) {
+        nextTarget();
+      }
+      prevDist = dist;
+
+      pill.style.transform =
+        `translate(${x - PILL_W / 2}px, ${y - PILL_H / 2}px) rotate(${angle}rad)`;
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+
+  setTimeout(spawnAtEdge, DELAY_MS);
+
+  window.addEventListener('resize', () => {
+    if (target) {
+      target.x = Math.min(target.x, window.innerWidth - MARGIN);
+      target.y = Math.min(target.y, window.innerHeight - MARGIN);
+    }
+  });
+</script>
+
+</body>
+</html>
